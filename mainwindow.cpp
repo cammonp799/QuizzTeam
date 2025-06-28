@@ -175,12 +175,17 @@ void MainWindow::setupJoinGamePage()
             QMessageBox::warning(this, "Erreur", "Le code doit contenir 6 chiffres!");
             return;
         }
-        
+
         currentPlayerName = playerNameEdit->text();
         isHost = false;
-        
-        // For simplicity, connect to localhost. In a real app, you'd need the host's IP
-        networkManager->connectToHost("127.0.0.1", 12345);
+
+        // ——— NOUVEAU : demander dynamiquement l’IP de l’hôte ———
+        QString hostIp = QInputDialog::getText(this,
+                                          "Adresse IP de l’hôte",
+                                          "Entrez l’IP de l’ordinateur qui a créé la partie :");
+        if (hostIp.isEmpty()) return;   // utilisateur a annulé
+
+        networkManager->connectToHost(hostIp.trimmed(), 12345);
     });
     connect(backToMenuBtn2, &QPushButton::clicked, this, &MainWindow::onBackToMenuClicked);
     
