@@ -4,14 +4,26 @@
 #include <QString>
 #include <QStringList>
 
-class Question {
-public:
+class Question
+{
+private:
     QString questionText;
-    QStringList choices;
-    int correctIndex;
+    QStringList answers;
+    int correctAnswerIndex;
 
-    Question(QString q = "", QStringList c = {}, int index = 0)
-        : questionText(q), choices(c), correctIndex(index) {}
+public:
+    Question();
+    Question(const QString& text, const QStringList& answerList, int correctIndex);
+    
+    QString getQuestionText() const;
+    QStringList getAnswers() const;
+    int getCorrectAnswerIndex() const;
+    
+    void setQuestionText(const QString& text);
+    void setAnswers(const QStringList& answerList);
+    void setCorrectAnswerIndex(int index);
+    
+    bool isCorrect(int answerIndex) const;
 };
 
 #endif // QUESTION_H
