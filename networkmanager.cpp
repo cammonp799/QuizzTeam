@@ -1,151 +1,99 @@
+
+// ---------- networkmanager.cpp ----------
 #include "networkmanager.h"
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QRandomGenerator>
-#include <QDebug>
 #include <QHostAddress>
-#include <QNetworkInterface>
+#include <QRandomGenerator>
+#include <QJsonParseError>
+#include <QDebug>
+
+static const char TERMINATOR = '\n'; // delimite chaque message JSON
 
 NetworkManager::NetworkManager(QObject *parent)
-    : QObject(parent), server(nullptr), clientSocket(nullptr), 
-      connectionTimer(nullptr), serverMode(false)
+    : QObject(parent), server(nullptr), clientSocket(nullptr), serverMode(false)
 {
-    connectionTimer = new QTimer(this);
-    connectionTimer->setSingleShot(true);
-    connect(connectionTimer, &QTimer::timeout, this, &NetworkManager::onConnectionTimeout);
 }
 
 NetworkManager::~NetworkManager()
 {
-    cleanupConnections();
+    stopServer();
+    disconnectFromHost();
 }
 
 bool NetworkManager::startServer(quint16 port)
 {
-    if (server) {
+    if (server)
         stopServer();
-    }
-    
+
     server = new QTcpServer(this);
     connect(server, &QTcpServer::newConnection, this, &NetworkManager::onNewConnection);
-    
-    // Essayer d'abord le port spécifié, sinon un port automatique
+
     if (!server->listen(QHostAddress::Any, port)) {
-        qDebug() << "Impossible d'écouter sur le port" << port << ":" << server->errorString();
-        
-        // Essayer avec un port automatique
-        if (!server->listen(QHostAddress::Any, 0)) {
-            emit connectionError("Impossible de démarrer le serveur: " + server->errorString());
-            delete server;
-            server = nullptr;
-            return false;
-        }
+        emit connectionError("Cannot start server: " + server->errorString());
+        server->deleteLater();
+        server = nullptr;
+        return false;
     }
-    
+
     serverMode = true;
-    quint16 actualPort = server->serverPort();
-    QString address = getServerAddress();
-    
-    qDebug() << "Serveur démarré sur" << address << ":" << actualPort;
-    emit serverStarted(actualPort, address);
+    emit serverStarted(server->serverPort());
     return true;
 }
 
 void NetworkManager::stopServer()
 {
-    if (server) {
-        qDebug() << "Arrêt du serveur...";
-        
-        // Déconnecter tous les clients proprement
-        for (auto it = connectedClients.begin(); it != connectedClients.end(); ++it) {
-            QTcpSocket* socket = it.key();
-            socket->disconnectFromHost();
-            if (socket->state() != QTcpSocket::UnconnectedState) {
-                socket->waitForDisconnected(1000);
-            }
-        }
-        connectedClients.clear();
-        
-        server->close();
-        delete server;
-        server = nullptr;
-        serverMode = false;
-        emit serverStopped();
+    if (!server)
+        return;
+
+    for (auto it = connectedClients.begin(); it != connectedClients.end(); ++it) {
+        it.key()->disconnectFromHost();
+        it.key()->deleteLater();
     }
+    connectedClients.clear();
+    buffers.clear();
+
+    server->close();
+    server->deleteLater();
+    server = nullptr;
+    serverMode = false;
+
+    emit serverStopped();
 }
 
 quint16 NetworkManager::getServerPort() const
 {
-    if (server && server->isListening()) {
-        return server->serverPort();
-    }
-    return 0;
+    return (server && server->isListening()) ? server->serverPort() : 0;
 }
 
-QString NetworkManager::getServerAddress() const
+void NetworkManager::connectToHost(const QString &hostAddress, quint16 port)
 {
-    // Obtenir l'adresse IP locale
-    QList<QHostAddress> addresses = QNetworkInterface::allAddresses();
-    
-    for (const QHostAddress& address : addresses) {
-        if (address != QHostAddress::LocalHost && 
-            address.toIPv4Address() && 
-            !address.isLoopback()) {
-            return address.toString();
-        }
-    }
-    
-    return QHostAddress(QHostAddress::LocalHost).toString();
-}
-
-void NetworkManager::connectToHost(const QString& hostAddress, quint16 port)
-{
-    if (clientSocket) {
+    if (clientSocket)
         disconnectFromHost();
-    }
-    
+
     clientSocket = new QTcpSocket(this);
-    
-    // Connecter les signaux
     connect(clientSocket, &QTcpSocket::connected, this, &NetworkManager::connectedToHost);
     connect(clientSocket, &QTcpSocket::disconnected, this, &NetworkManager::disconnectedFromHost);
     connect(clientSocket, &QTcpSocket::readyRead, this, &NetworkManager::onDataReceived);
-    
-    // Gestion des erreurs avec la nouvelle syntaxe Qt5+
-    connect(clientSocket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::errorOccurred),
-            [this](QAbstractSocket::SocketError error) {
-                Q_UNUSED(error)
-                QString errorMsg = QString("Erreur de connexion: %1").arg(clientSocket->errorString());
-                qDebug() << errorMsg;
-                emit connectionError(errorMsg);
-                connectionTimer->stop();
+    connect(clientSocket, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::errorOccurred),
+            [this](QAbstractSocket::SocketError) {
+                emit connectionError(clientSocket->errorString());
             });
-    
+
     serverMode = false;
-    
-    // Démarrer un timer de timeout pour la connexion
-    connectionTimer->start(5000); // 5 secondes timeout
-    
-    qDebug() << "Tentative de connexion à" << hostAddress << ":" << port;
     clientSocket->connectToHost(hostAddress, port);
 }
 
 void NetworkManager::disconnectFromHost()
 {
-    if (clientSocket) {
-        connectionTimer->stop();
-        clientSocket->disconnectFromHost();
-        
-        if (clientSocket->state() != QTcpSocket::UnconnectedState) {
-            clientSocket->waitForDisconnected(1000);
-        }
-        
-        delete clientSocket;
-        clientSocket = nullptr;
-    }
+    if (!clientSocket)
+        return;
+
+    clientSocket->disconnectFromHost();
+    clientSocket->deleteLater();
+    clientSocket = nullptr;
+    clientBuffer.clear();
 }
 
-void NetworkManager::sendMessage(const QJsonObject& message)
+void NetworkManager::sendMessage(const QJsonObject &message)
 {
     if (serverMode) {
         broadcastMessage(message);
@@ -154,10 +102,11 @@ void NetworkManager::sendMessage(const QJsonObject& message)
     }
 }
 
-void NetworkManager::broadcastMessage(const QJsonObject& message)
+void NetworkManager::broadcastMessage(const QJsonObject &message)
 {
-    if (!serverMode) return;
-    
+    if (!serverMode)
+        return;
+
     for (auto it = connectedClients.begin(); it != connectedClients.end(); ++it) {
         sendToClient(it.key(), message);
     }
@@ -170,11 +119,8 @@ bool NetworkManager::isServer() const
 
 bool NetworkManager::isConnected() const
 {
-    if (serverMode) {
-        return server && server->isListening();
-    } else {
-        return clientSocket && clientSocket->state() == QTcpSocket::ConnectedState;
-    }
+    return serverMode ? (server && server->isListening())
+                      : (clientSocket && clientSocket->state() == QTcpSocket::ConnectedState);
 }
 
 QStringList NetworkManager::getConnectedClients() const
@@ -182,86 +128,88 @@ QStringList NetworkManager::getConnectedClients() const
     return connectedClients.values();
 }
 
-int NetworkManager::getClientCount() const
-{
-    return connectedClients.size();
-}
-
 void NetworkManager::onNewConnection()
 {
-    if (!server) return;
-    
     while (server->hasPendingConnections()) {
-        QTcpSocket* socket = server->nextPendingConnection();
+        QTcpSocket *socket = server->nextPendingConnection();
         QString clientId = generateClientId();
-        
+
         connectedClients[socket] = clientId;
-        
-        connect(socket, &QTcpSocket::disconnected, this, &NetworkManager::onClientDisconnected);
+        buffers[socket] = QByteArray();
+
         connect(socket, &QTcpSocket::readyRead, this, &NetworkManager::onDataReceived);
-        
-        qDebug() << "Nouveau client connecté:" << clientId << "depuis" << socket->peerAddress().toString();
+        connect(socket, &QTcpSocket::disconnected, this, &NetworkManager::onClientDisconnected);
+
         emit clientConnected(clientId);
     }
 }
 
 void NetworkManager::onClientDisconnected()
 {
-    QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
-    if (!socket) return;
-    
-    QString clientId = connectedClients.value(socket, "");
-    connectedClients.remove(socket);
-    
-    qDebug() << "Client déconnecté:" << clientId;
+    QTcpSocket *socket = qobject_cast<QTcpSocket *>(sender());
+    if (!socket)
+        return;
+
+    QString clientId = connectedClients.take(socket);
+    buffers.remove(socket);
+
     socket->deleteLater();
-    
-    if (!clientId.isEmpty()) {
-        emit clientDisconnected(clientId);
-    }
+
+    emit clientDisconnected(clientId);
 }
 
 void NetworkManager::onDataReceived()
 {
-    QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
-    if (!socket) return;
-    
-    while (socket->canReadLine()) {
-        QByteArray data = socket->readLine();
-        
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(data, &error);
-        
-        if (error.error != QJsonParseError::NoError) {
-            qDebug() << "Erreur JSON:" << error.errorString();
+    QTcpSocket *socket = qobject_cast<QTcpSocket *>(sender());
+    if (!socket)
+        return;
+
+    QByteArray data = socket->readAll();
+
+    if (serverMode) {
+        QByteArray &buffer = buffers[socket];
+        buffer.append(data);
+        processBuffer(buffer, socket);
+    } else {
+        clientBuffer.append(data);
+        processBuffer(clientBuffer, nullptr);
+    }
+}
+
+void NetworkManager::processBuffer(QByteArray &buffer, QTcpSocket *originSocket)
+{
+    int idx;
+    while ((idx = buffer.indexOf(TERMINATOR)) != -1) {
+        QByteArray line = buffer.left(idx);
+        buffer.remove(0, idx + 1); // supprime y compris le terminator
+
+        if (line.isEmpty())
+            continue;
+
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(line, &err);
+        if (err.error != QJsonParseError::NoError) {
+            qDebug() << "JSON parse error:" << err.errorString();
             continue;
         }
-        
-        QJsonObject message = doc.object();
-        
+
+        QJsonObject obj = doc.object();
+
         if (serverMode) {
-            QString clientId = connectedClients.value(socket, "");
-            handleClientMessage(socket, message);
-            emit messageReceived(message, clientId);
+            QString clientId = connectedClients.value(originSocket);
+            handleClientMessage(originSocket, obj);
+            emit messageReceived(obj, clientId);
         } else {
-            emit messageReceived(message, "server");
+            emit messageReceived(obj, "server");
         }
     }
 }
 
-void NetworkManager::onConnectionTimeout()
+void NetworkManager::handleClientMessage(QTcpSocket *socket, const QJsonObject &message)
 {
-    if (clientSocket && clientSocket->state() == QTcpSocket::ConnectingState) {
-        clientSocket->abort();
-        emit connectionError("Timeout: Impossible de se connecter au serveur");
-    }
-}
-
-void NetworkManager::handleClientMessage(QTcpSocket* socket, const QJsonObject& message)
-{
-    // Traiter les messages spécifiques du client si nécessaire
     Q_UNUSED(socket)
     Q_UNUSED(message)
+    // Ici, l’hôte peut filtrer ou valider les messages entrants si nécessaire
 }
 
 QString NetworkManager::generateClientId()
@@ -269,29 +217,15 @@ QString NetworkManager::generateClientId()
     return QString("client_%1").arg(QRandomGenerator::global()->bounded(1000, 9999));
 }
 
-void NetworkManager::sendToClient(QTcpSocket* socket, const QJsonObject& message)
+void NetworkManager::sendToClient(QTcpSocket *socket, const QJsonObject &message)
 {
-    if (!socket || socket->state() != QTcpSocket::ConnectedState) {
+    if (!socket || socket->state() != QTcpSocket::ConnectedState)
         return;
-    }
-    
-    QJsonDocument doc(message);
-    QByteArray data = doc.toJson(QJsonDocument::Compact) + "\n"; // Ajouter un saut de ligne
-    
-    qint64 bytesWritten = socket->write(data);
-    if (bytesWritten == -1) {
-        qDebug() << "Erreur lors de l'envoi:" << socket->errorString();
-    } else {
-        socket->flush();
-    }
-}
 
-void NetworkManager::cleanupConnections()
-{
-    stopServer();
-    disconnectFromHost();
-    
-    if (connectionTimer) {
-        connectionTimer->stop();
-    }
+    QJsonDocument doc(message);
+    QByteArray payload = doc.toJson(QJsonDocument::Compact);
+    payload.append(TERMINATOR);
+
+    socket->write(payload);
+    socket->flush();
 }
