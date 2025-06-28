@@ -1,36 +1,46 @@
+// question.cpp - Corrections
 #include "question.h"
 
-// Constructeur par défaut
 Question::Question() 
     : correctAnswerIndex(0)
 {
 }
 
-// Constructeur avec paramètres
-Question::Question(const QString& text, const QList<QString>& answers, int correctIndex)
+Question::Question(const QString& text, const QStringList& answers, int correctIndex)
     : questionText(text), answers(answers), correctAnswerIndex(correctIndex)
 {
 }
 
-// Getter pour le texte de la question
 QString Question::getQuestionText() const
 {
     return questionText;
 }
 
-// Getter pour les réponses
-QList<QString> Question::getAnswers() const
+QStringList Question::getAnswers() const  // Correction du type de retour
 {
     return answers;
 }
 
-// Getter pour l'index de la bonne réponse
 int Question::getCorrectAnswerIndex() const
 {
     return correctAnswerIndex;
 }
 
-// Vérifier si la réponse est correcte
+void Question::setQuestionText(const QString& text)
+{
+    questionText = text;
+}
+
+void Question::setAnswers(const QStringList& answerList)
+{
+    answers = answerList;
+}
+
+void Question::setCorrectAnswerIndex(int index)
+{
+    correctAnswerIndex = index;
+}
+
 bool Question::isCorrect(int answerIndex) const
 {
     return answerIndex == correctAnswerIndex;

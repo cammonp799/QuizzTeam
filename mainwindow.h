@@ -68,6 +68,7 @@ private:
     void setupGamePage();
     void setupResultsPage();
     void setupFinalResultsPage();
+    void debugGameState();
     
     // UI Updates
     void updatePlayerList();

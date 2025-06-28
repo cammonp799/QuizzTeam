@@ -8,7 +8,7 @@ class Question
 {
 private:
     QString questionText;
-    QStringList answers;
+    QStringList answers;  // Utiliser QStringList partout
     int correctAnswerIndex;
 
 public:
@@ -16,7 +16,7 @@ public:
     Question(const QString& text, const QStringList& answerList, int correctIndex);
     
     QString getQuestionText() const;
-    QStringList getAnswers() const;
+    QStringList getAnswers() const;  // Cohérent avec le type membre
     int getCorrectAnswerIndex() const;
     
     void setQuestionText(const QString& text);

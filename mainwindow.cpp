@@ -400,10 +400,22 @@ void MainWindow::onAnswerSelected()
 
 void MainWindow::onNextQuestionClicked()
 {
-    game->nextQuestion();
-    sendNetworkMessage("next_question");
+    qDebug() << "=== NEXT QUESTION CLICKED ===";
+    qDebug() << "Is host:" << isHost;
+    qDebug() << "Current question index before:" << game->getCurrentQuestionIndex();
+    qDebug() << "Total questions:" << game->getTotalQuestions();
+    
+    if (isHost) {
+        game->nextQuestion();
+        sendNetworkMessage("next_question");
+        qDebug() << "Host processed next question";
+    } else {
+        qDebug() << "ERROR: Non-host tried to click next question!";
+    }
+    
+    qDebug() << "Current question index after:" << game->getCurrentQuestionIndex();
+    qDebug() << "=============================";
 }
-
 void MainWindow::onBackToMenuClicked()
 {
     // Reset everything
@@ -455,6 +467,11 @@ void MainWindow::onGameStarted()
 
 void MainWindow::onQuestionChanged(const Question& question)
 {
+    qDebug() << "=== QUESTION CHANGED ===";
+    qDebug() << "New question:" << question.getQuestionText();
+    qDebug() << "Question index:" << game->getCurrentQuestionIndex();
+    qDebug() << "Is host:" << isHost;
+    
     updateGameQuestion();
     
     // Reset UI
@@ -466,6 +483,14 @@ void MainWindow::onQuestionChanged(const Question& question)
     submitAnswerBtn->setEnabled(false);
     waitingLabel->hide();
     timerProgress->setValue(10);
+    
+    // S'assurer qu'on est sur la bonne page
+    if (stackedWidget->currentIndex() != GAME_PAGE) {
+        qDebug() << "Switching to game page";
+        showPage(GAME_PAGE);
+    }
+    
+    qDebug() << "=======================";
 }
 
 void MainWindow::onAnswerSubmitted(const QString& playerName, int answer)
@@ -483,7 +508,11 @@ void MainWindow::onResultsReady(const QMap<QString, bool>& results)
     updateResults();
     showPage(RESULTS_PAGE);
     
-    if (!isHost) {
+    // Montrer le bouton seulement pour l'hôte
+    if (isHost) {
+        nextQuestionBtn->show();
+        nextQuestionBtn->setEnabled(true);
+    } else {
         nextQuestionBtn->hide();
     }
 }
@@ -626,10 +655,26 @@ void MainWindow::sendNetworkMessage(const QString& type, const QJsonObject& data
     networkManager->sendMessage(message);
 }
 
+void MainWindow::debugGameState()
+{
+    qDebug() << "=== DEBUG GAME STATE ===";
+    qDebug() << "Current question index:" << game->getCurrentQuestionIndex();
+    qDebug() << "Total questions:" << game->getTotalQuestions();
+    qDebug() << "Game state:" << game->getState();
+    qDebug() << "Is host:" << isHost;
+    qDebug() << "Current page:" << stackedWidget->currentIndex();
+    qDebug() << "Next question button visible:" << nextQuestionBtn->isVisible();
+    qDebug() << "Next question button enabled:" << nextQuestionBtn->isEnabled();
+    qDebug() << "========================";
+}
+
+
 void MainWindow::handleNetworkMessage(const QJsonObject& message, const QString& senderId)
 {
     QString type = message["type"].toString();
     QJsonObject data = message["data"].toObject();
+    
+    qDebug() << "Received network message:" << type << "from:" << senderId;
     
     if (type == "join_game") {
         QString playerName = data["playerName"].toString();
@@ -637,6 +682,7 @@ void MainWindow::handleNetworkMessage(const QJsonObject& message, const QString&
     }
     else if (type == "start_game") {
         if (!isHost) {
+            qDebug() << "Client received start_game message";
             game->startGame();
         }
     }
@@ -648,8 +694,12 @@ void MainWindow::handleNetworkMessage(const QJsonObject& message, const QString&
         }
     }
     else if (type == "next_question") {
+        qDebug() << "Received next_question message, isHost:" << isHost;
         if (!isHost) {
+            qDebug() << "Client processing next question";
             game->nextQuestion();
+        } else {
+            qDebug() << "Host ignoring next_question message (already processed)";
         }
     }
 }
