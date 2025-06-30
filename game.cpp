@@ -62,6 +62,23 @@ QStringList Game::getPlayers() const
     return playerScores.keys();
 }
 
+Game::Theme Game::getSelectedTheme() const
+{
+    return selectedTheme;
+}
+
+void Game::setupClientGame(Theme theme)
+{
+    selectedTheme        = theme;
+    questions            = getQuestionsForTheme(theme);
+    currentQuestionIndex = 0;
+    state                = WAITING;
+    isHost               = false;
+
+    playerScores.clear();
+    currentAnswers.clear();
+}
+
 void Game::startGame()
 {
     if (questions.isEmpty() || playerScores.isEmpty()) {

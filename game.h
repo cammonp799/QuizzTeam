@@ -66,6 +66,8 @@ public:
     GameState getState() const;
     QString getWinner() const;
     bool getIsHost() const;
+    Theme getSelectedTheme() const;
+    void setupClientGame(Theme theme);
     
     // Static methods
     static QString generateGameCode();

@@ -684,7 +684,21 @@ void MainWindow::handleNetworkMessage(const QJsonObject& message, const QString&
     if (type == "join_game") {
         QString playerName = data["playerName"].toString();
         game->addPlayer(playerName);
+
+        // --- AJOUT : uniquement côté hôte, on diffuse le thème ---
+        if (isHost) {
+            QJsonObject info;
+            info["theme"] = static_cast<int>(game->getSelectedTheme());
+            sendNetworkMessage("setup_game", info);
+        }
     }
+    else if (type == "setup_game" && !isHost) {
+        int themeId = data["theme"].toInt();
+        game->setupClientGame(static_cast<Game::Theme>(themeId));
+        game->addPlayer(currentPlayerName);          // s’ajouter soi-même
+    }
+
+
     else if (type == "start_game") {
         if (!isHost) {
             qDebug() << "Client received start_game message";
