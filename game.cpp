@@ -82,7 +82,7 @@ void Game::startGame()
     QTimer* updateTimer = new QTimer(this);
     updateTimer->setInterval(1000);
     int secondsLeft = 10;
-
+    
     connect(updateTimer, &QTimer::timeout, [this, updateTimer, &secondsLeft]() mutable {
         secondsLeft--;
         emit timeUpdate(secondsLeft);
@@ -91,7 +91,7 @@ void Game::startGame()
             updateTimer->deleteLater();
         }
     });
-
+    
     updateTimer->start();
 }
 
